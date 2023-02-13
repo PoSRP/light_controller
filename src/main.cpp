@@ -57,24 +57,14 @@ struct fsm_logger {
 };
 }  // namespace logger
 
-namespace ctrl {
-// Declared before the hw namespace because it's all in one file
-enum TIMESLOT { LONG, SHORT };
-}  // namespace ctrl
-
 namespace hw {
 enum LEVEL { HIGH, LOW };
 enum INPUT_MODE { PULL_UP, PULL_DOWN };
 
-template <typename T>
-concept component = requires {
-  T::setup;
-  T::on;
-  T::off;
-};
+template <auto Name, int Pin>
+struct output {
+  inline static bool last_value{false};
 
-template <int Pin>
-struct output final {
   static constexpr auto setup = [] {
 #ifdef ON_RPI
     pinMode(uint8_t(Pin), OUTPUT);
@@ -85,17 +75,27 @@ struct output final {
 #ifdef ON_RPI
     digitalWrite(uint8_t(Pin), HIGH);
 #endif
+
+    if (!last_value) {
+      last_value = !last_value;
+      printf("  Output [%s] (%d) toggled HIGH\n", Name, Pin);
+    }
   };
 
   static constexpr auto off = [] {
 #ifdef ON_RPI
     digitalWrite(uint8_t(Pin), LOW);
 #endif
+
+    if (last_value) {
+      last_value = !last_value;
+      printf("  Output [%s] (%d) toggled LOW\n", Name, Pin);
+    }
   };
 };
 
-template <int Pin, INPUT_MODE Mode>
-struct input final {
+template <auto Name, int Pin, INPUT_MODE Mode>
+struct input {
   inline static bool last_value{false};
 
   static constexpr auto setup = [] {
@@ -114,14 +114,20 @@ struct input final {
   };
 
   static constexpr auto toggled = [] {
-    bool is_pressed;
+    bool is_pressed{};
 #ifdef ON_RPI
     is_pressed = digitalRead(Pin);
 #else
-    is_pressed = rand() % 10000 ? true : false;
+    is_pressed = rand() % 1000 ? false : true;
 #endif
     if (last_value != is_pressed) {
       last_value = is_pressed;
+
+      printf("  Input [%s] (%d) toggled '%s'\n",
+             Name,
+             Pin,
+             is_pressed ? "HIGH" : "LOW");
+
       return true;
     } else {
       return false;
@@ -132,23 +138,30 @@ struct input final {
 }  // namespace hw
 
 namespace ctrl {
+enum TIMESLOT { LONG, SHORT };
 
 // STATE VARIABLES
+#ifdef USING_THREAD
+static std::atomic<TIMESLOT> active_timeslot = TIMESLOT::LONG;
 static std::atomic<int64_t> start_time_minutes{};
 static std::atomic<bool> task_running{false};
-#ifdef USING_THREAD
 static std::thread task_thread;
-#endif
+#else
 static TIMESLOT active_timeslot = TIMESLOT::LONG;
+static int64_t start_time_minutes{};
+#endif
 
 // CONSTANTS
 static const std::string long_on_time  = "18:00";
 static const std::string short_on_time = "12:00";
 
 // HARDWARE
-using In_OnOff  = hw::input<8, hw::INPUT_MODE::PULL_DOWN>;
-using In_Mode   = hw::input<9, hw::INPUT_MODE::PULL_DOWN>;
-using Out_Light = hw::output<10>;
+static constexpr char di_onoff_name[7] = "on/off";
+static constexpr char di_mode_name[5]  = "mode";
+static constexpr char do_light_name[6] = "light";
+using di_onoff = hw::input<di_onoff_name, 8, hw::INPUT_MODE::PULL_DOWN>;
+using di_mode  = hw::input<di_mode_name, 9, hw::INPUT_MODE::PULL_DOWN>;
+using do_light = hw::output<do_light_name, 10>;
 
 // EVENTS
 struct turn_on {
@@ -204,7 +217,7 @@ void iterate_task() {
   std::time(&now);
   std::tm *curtime      = std::localtime(&now);
   const auto now_time   = curtime->tm_hour * 60L + curtime->tm_min;
-  const auto start_time = start_time_minutes.load();
+  const auto start_time = start_time_minutes;
 
   std::string dur_time_s;
   if (active_timeslot == TIMESLOT::LONG) {
@@ -223,14 +236,14 @@ void iterate_task() {
 
   if (stop_next_day) {
     if (start_time < now_time)
-      Out_Light::on();
+      do_light::on();
     else
-      Out_Light::off();
+      do_light::off();
   } else {
     if (now_time < stop_time)
-      Out_Light::on();
+      do_light::on();
     else
-      Out_Light::off();
+      do_light::off();
   }
 }
 
@@ -239,7 +252,7 @@ void timer_task() {
   while (task_running.load()) {
     iterate_task();
     using namespace std::chrono_literals;
-    std::this_thread::sleep_for(100ms);
+    std::this_thread::sleep_for(1ms);
   }
 }
 #endif
@@ -272,6 +285,7 @@ struct off_action {
       printf("  Task thread joined\n");
     }
 #endif
+    do_light::off();
   };
 } off_action;
 
@@ -281,15 +295,18 @@ struct change_on_time_action {
       active_timeslot = TIMESLOT::LONG;
     else
       active_timeslot = TIMESLOT::SHORT;
+
+    printf("  Set TIMESLOT=%s\n",
+           active_timeslot == TIMESLOT::SHORT ? "SHORT" : "LONG");
   }
 } change_on_time_action;
 
 // TABLE
 struct fsm {
   constexpr fsm() {
-    In_OnOff::setup();
-    In_Mode::setup();
-    Out_Light::setup();
+    di_onoff::setup();
+    di_mode::setup();
+    do_light::setup();
   }
 
   auto operator()() const noexcept {
@@ -327,16 +344,17 @@ int main(int argc, char *argv[]) {
   assert(sm.is(sml::state<on>));
 
   while (1) {
-    if (In_OnOff::toggled() && sm.is(sml::state<on>))
-      sm.process_event(turn_off{});
-    else if (In_OnOff::toggled() && sm.is(sml::state<off>))
+    if (di_onoff::toggled() && sm.is(sml::state<off>))
       sm.process_event(turn_on{args[1]});
+    else if (di_onoff::toggled() && sm.is(sml::state<on>))
+      sm.process_event(turn_off{});
 
-    if (In_Mode::toggled())
+    if (di_mode::toggled())
       sm.process_event(change_on_time{});
 
 #ifndef USING_THREAD
-    ctrl::iterate_task();
+    if (sm.is(sml::state<on>))
+      ctrl::iterate_task();
 #endif
     usleep(1000);  // Only to avoid 100% core load
   }
