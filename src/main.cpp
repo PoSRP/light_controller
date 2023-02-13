@@ -305,9 +305,9 @@ struct fsm {
     return make_transition_table(
     // STATE ------ EVENT ---------------- GUARD ---------- ACTION ---------------- STATE ----- //
       *state<off> + event<turn_on>        [turn_on_guard] / on_action             = state<on>,
-      state<on>   + event<turn_off>                       / off_action            = state<off>,
+       state<on>  + event<turn_off>                       / off_action            = state<off>,
     // ---------------------------------------------------------------------------------------- //
-      state<on>   + event<change_on_time>                 / change_on_time_action = state<on>);
+       state<on>  + event<change_on_time>                 / change_on_time_action = state<on>);
     // ---------------------------------------------------------------------------------------- //
     // clang-format on
   }
