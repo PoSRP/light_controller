@@ -11,7 +11,7 @@
 #include <ctime>
 #include <string>
 
-// #define USING_THREAD
+#define USING_THREAD
 #ifdef USING_THREAD
 #include <thread>
 #endif
@@ -215,9 +215,14 @@ class off;
 void iterate_task() {
   std::time_t now;
   std::time(&now);
-  std::tm *curtime      = std::localtime(&now);
-  const auto now_time   = curtime->tm_hour * 60L + curtime->tm_min;
+  std::tm *curtime    = std::localtime(&now);
+  const auto now_time = curtime->tm_hour * 60L + curtime->tm_min;
+
+#ifdef USING_THREAD
+  const auto start_time = start_time_minutes.load();
+#else
   const auto start_time = start_time_minutes;
+#endif
 
   std::string dur_time_s;
   if (active_timeslot == TIMESLOT::LONG) {
