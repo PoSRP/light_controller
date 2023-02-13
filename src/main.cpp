@@ -58,8 +58,8 @@ struct fsm_logger {
 }  // namespace logger
 
 namespace hw {
-enum LEVEL { HIGH, LOW };
-enum INPUT_MODE { PULL_UP, PULL_DOWN };
+enum LEVEL { LOW, HIGH };
+enum INPUT_MODE { PULL_DOWN, PULL_UP };
 
 template <auto Name, int Pin>
 struct output {
@@ -75,7 +75,6 @@ struct output {
 #ifdef ON_RPI
     digitalWrite(uint8_t(Pin), HIGH);
 #endif
-
     if (!last_value) {
       last_value = !last_value;
       printf("  Output [%s] (%d) toggled HIGH\n", Name, Pin);
@@ -86,7 +85,6 @@ struct output {
 #ifdef ON_RPI
     digitalWrite(uint8_t(Pin), LOW);
 #endif
-
     if (last_value) {
       last_value = !last_value;
       printf("  Output [%s] (%d) toggled LOW\n", Name, Pin);
@@ -105,14 +103,6 @@ struct input {
 #endif
   };
 
-  static constexpr auto on = [](const auto &event) {
-    return event() == LEVEL::HIGH;
-  };
-
-  static constexpr auto off = [](const auto &event) {
-    return event() == LEVEL::LOW;
-  };
-
   static constexpr auto toggled = [] {
     bool is_pressed{};
 #ifdef ON_RPI
@@ -122,12 +112,10 @@ struct input {
 #endif
     if (last_value != is_pressed) {
       last_value = is_pressed;
-
       printf("  Input [%s] (%d) toggled '%s'\n",
              Name,
              Pin,
              is_pressed ? "HIGH" : "LOW");
-
       return true;
     } else {
       return false;
@@ -156,9 +144,9 @@ static const std::string long_on_time  = "18:00";
 static const std::string short_on_time = "12:00";
 
 // HARDWARE
-static constexpr char di_onoff_name[7] = "on/off";
-static constexpr char di_mode_name[5]  = "mode";
-static constexpr char do_light_name[6] = "light";
+static constexpr const char di_onoff_name[7] = "on/off";
+static constexpr const char di_mode_name[5]  = "mode";
+static constexpr const char do_light_name[6] = "light";
 using di_onoff = hw::input<di_onoff_name, 8, hw::INPUT_MODE::PULL_DOWN>;
 using di_mode  = hw::input<di_mode_name, 9, hw::INPUT_MODE::PULL_DOWN>;
 using do_light = hw::output<do_light_name, 10>;
@@ -185,8 +173,7 @@ struct turn_on_guard {
 
     const auto on_hour   = e.time_on.substr(0, 2);
     const auto on_minute = e.time_on.substr(3, 2);
-
-    auto is_number = [](const std::string &s) {
+    auto is_number       = [](const std::string &s) {
       return s.find_first_not_of("0123456789") == std::string::npos;
     };
 
@@ -266,7 +253,6 @@ void timer_task() {
 struct on_action {
   void operator()(const turn_on &a) {
     printf("  Starting with 'on_time=%s'\n", a.time_on.c_str());
-
 #ifdef USING_THREAD
     if (!task_running.load()) {
       task_running.exchange(true);
@@ -274,7 +260,6 @@ struct on_action {
       printf("  Task thread started\n");
     }
 #endif
-
     const auto on_hour   = std::stoi(a.time_on.substr(0, 2));
     const auto on_minute = std::stoi(a.time_on.substr(3, 2));
     start_time_minutes   = on_hour * 60 + on_minute;
