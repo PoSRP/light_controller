@@ -230,7 +230,7 @@ void iterate_task() {
 
   const auto duration_hour   = std::stoi(dur_time_s.substr(0, 2));
   const auto duration_minute = std::stoi(dur_time_s.substr(3, 2));
-  const auto duration_time   = duration_hour * 24 + duration_minute;
+  const auto duration_time   = duration_hour * 60 + duration_minute;
   const auto stop_time       = (start_time + duration_time) % (24L * 60L);
   const auto stop_next_day   = (stop_time < start_time);
 
