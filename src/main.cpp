@@ -239,16 +239,6 @@ void iterate_task() {
   }
 }
 
-#ifdef USING_THREAD
-void timer_task() {
-  while (task_running.load()) {
-    iterate_task();
-    using namespace std::chrono_literals;
-    std::this_thread::sleep_for(1ms);
-  }
-}
-#endif
-
 // ACTIONS
 struct on_action {
   void operator()(const turn_on &a) {
@@ -256,7 +246,14 @@ struct on_action {
 #ifdef USING_THREAD
     if (!task_running.load()) {
       task_running.exchange(true);
-      task_thread = std::thread(&timer_task);
+      // task_thread = std::thread(&timer_task);
+      task_thread = std::thread([&]() {
+        while (task_running.load()) {
+          iterate_task();
+          using namespace std::chrono_literals;
+          std::this_thread::sleep_for(1ms);
+        }
+      });
       printf("  Task thread started\n");
     }
 #endif
